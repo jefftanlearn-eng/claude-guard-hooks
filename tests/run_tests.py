@@ -57,7 +57,7 @@ def write_transcript(case):
             elif kind == "assistant":
                 row = {"type": "assistant", "message": {"content": [{"type": "text", "text": val}]}}
             else:
-                name, inp = (("Bash", {"command": "make", "run_in_background": True}) if val == "Bash:bg"
+                name, inp = ((val[:-3], {"command": "make", "run_in_background": True}) if val.endswith(":bg")
                              else (val, {}))
                 row = {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": name, "input": inp}]}}
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -82,7 +82,8 @@ def test_stop(script, fixture):
 
 def test_pipe():
     for case in json.load(open(os.path.join(FIX, "pipe_exitcode.json"), encoding="utf-8")):
-        got, _, detail = run_hook("pre_pipe_exitcode.py", {"tool_name": "Bash", "tool_input": {"command": case["command"]}},
+        got, _, detail = run_hook("pre_pipe_exitcode.py", {"tool_name": case.get("tool", "Bash"),
+                                                          "tool_input": {"command": case["command"]}},
                                   case.get("env"))
         check("pipe_exitcode.json", case["name"], case["expect"], got, detail)
 
@@ -122,7 +123,7 @@ def test_secret():
                 git(repo, "push", "-q", "origin", "HEAD:refs/heads/main")
                 git(repo, "fetch", "-q", "origin")
         cwd = parent if case.get("cwd") == "parent" else repo
-        payload = {"tool_name": "Bash", "cwd": cwd, "tool_input": {"command": fill(case["command"], repo)}}
+        payload = {"tool_name": case.get("tool", "Bash"), "cwd": cwd, "tool_input": {"command": fill(case["command"], repo)}}
         got, _, detail = run_hook("pre_push_secret_scan.py", payload, case.get("env"), cwd=cwd)
         check("secret_scan.json", case["name"], case["expect"], got, detail)
         if i == 0:
@@ -196,6 +197,45 @@ def test_general():
     except (ValueError, KeyError, IndexError):
         ok = False
     check(g, "install.py 输出可用的 JSON 片段", True, ok, out[:400])
+
+    # 6) PreToolUse hooks must also fire for the PowerShell tool (Windows). A matcher made only of
+    #    letters and "|" is an exact-name list in Claude Code, so it must list both names exactly.
+    try:
+        matchers = [grp.get("matcher") for grp in snippet["hooks"]["PreToolUse"]]
+        ok = bool(matchers) and all(m and set(m.split("|")) == {"Bash", "PowerShell"} for m in matchers)
+    except (NameError, KeyError, TypeError):
+        ok, matchers = False, None
+    check(g, "install.py PreToolUse matcher = Bash|PowerShell", True, ok, repr(matchers))
+
+    # 7) Traditional Chinese coverage: every CJK char in any hook pattern, written in Taiwan
+    #    Traditional (opencc s2tw), must fold back to itself via _common.to_simp. Skipped without opencc.
+    try:
+        import opencc  # noqa: F401 - optional, dev only
+        cc = opencc.OpenCC("s2tw")
+    except Exception:  # noqa: BLE001
+        cc = None
+    if cc is None:
+        results.append((g, "繁体覆盖检查 (opencc not installed - skipped)", True, ""))
+    else:
+        sys.path.insert(0, HOOKS)
+        import _common
+        chars, missing = set(), []
+        for fn in sorted(os.listdir(HOOKS)):
+            if fn.endswith(".py"):
+                spec = importlib.util.spec_from_file_location("t_" + fn[:-3], os.path.join(HOOKS, fn))
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                for v in vars(mod).values():
+                    for p in ([v] if isinstance(v, re.Pattern) else
+                              [x[1] for x in v if isinstance(x, tuple) and len(x) > 1 and isinstance(x[1], re.Pattern)]
+                              if isinstance(v, list) else []):
+                        chars |= set(re.findall(r"[一-鿿]", p.pattern))
+        fold = getattr(_common, "to_simp", lambda x: x)
+        for ch in sorted(chars):
+            t = cc.convert(ch)
+            if fold(t) != ch:
+                missing.append("{}->{}".format(ch, t))
+        check(g, "繁体覆盖：规则里每个汉字的台湾繁体都能折回简体 ({} chars)".format(len(chars)), [], missing, " ".join(missing))
 
 
 def main():

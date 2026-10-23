@@ -13,6 +13,22 @@ import time
 PREFIX = "CGH_"
 
 
+# ── Traditional Chinese (Taiwan) ──────────────────────────────────────────
+# Every rule below is written once, in Simplified. Text is folded Traditional -> Simplified
+# with a 1:1 per-character table first, so string positions stay identical (a hit can be
+# sliced back out of the original text). The table covers every Traditional (s2tw) form of
+# every CJK character used in any hook pattern; tests/run_tests.py re-checks this with
+# opencc when it is installed. Characters outside the rules are left alone on purpose.
+_TRAD = "丟並來個備兩別劃問啟嗎執實寫將對幾張後徑復應戶掛換據擱攔於時暫會條棄樣機決沒測準無現畫確結經綠纔臺著處親計設試話該說講證議讀載辦這運過選還開隨項題馬驗麼"
+_SIMP = "丢并来个备两别划问启吗执实写将对几张后径复应户挂换据搁拦于时暂会条弃样机决没测准无现画确结经绿才台着处亲计设试话该说讲证议读载办这运过选还开随项题马验么"
+_TO_SIMP = str.maketrans(_TRAD, _SIMP)
+
+
+def to_simp(s):
+    """Fold Traditional characters used by the rules to Simplified (same length)."""
+    return s.translate(_TO_SIMP)
+
+
 # ── config ────────────────────────────────────────────────────────────────
 def disabled(name):
     """CGH_DISABLE=1 turns off every hook; CGH_DISABLE_<NAME>=1 turns off one."""
@@ -148,7 +164,7 @@ def recent_user_text(rows, lookback=2):
 
 def turn_tool_calls(rows, lookback=2):
     """Main-thread tool calls since the `lookback`-th most recent real user message, oldest first.
-    Background Bash shows up as an extra pseudo-tool 'Bash:background'."""
+    Background Bash / PowerShell shows up as an extra pseudo-tool 'Bash:background'."""
     calls, seen = [], 0
     for row in reversed(rows or []):
         if row.get("isSidechain"):
@@ -169,7 +185,7 @@ def turn_tool_calls(rows, lookback=2):
         content = (row.get("message") or {}).get("content")
         for b in reversed(content if isinstance(content, list) else []):
             if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name"):
-                if b["name"] == "Bash" and (b.get("input") or {}).get("run_in_background"):
+                if b["name"] in ("Bash", "PowerShell") and (b.get("input") or {}).get("run_in_background"):
                     calls.append("Bash:background")
                 calls.append(b["name"])
     calls.reverse()
@@ -194,7 +210,7 @@ def last_assistant_text(data, rows):
 FENCE = re.compile(r"```.*?(?:```|\Z)", re.S)
 INLINE_CODE = re.compile(r"`[^`\n]+`")
 QUOTE = re.compile(r"「[^」\n]*」|『[^』\n]*』|“[^”\n]*”|\"[^\"\n]{1,120}\"")
-ATTRIBUTION = re.compile(r"(?:你|用户|您|对方|他|她)(?:说|问|写|讲|提到|原话)[了过]?\s*[:：]?\s*$|(?:you|user)\s+(?:said|wrote|asked)\s*[:,]?\s*$", re.I)
+ATTRIBUTION = re.compile(r"(?:你|用户|使用者|您|对方|他|她)(?:说|问|写|讲|提到|原话)[了过]?\s*[:：]?\s*$|(?:you|user)\s+(?:said|wrote|asked)\s*[:,]?\s*$", re.I)
 BLOCKQUOTE = re.compile(r"^\s*>.*$", re.M)
 CJK = re.compile(r"[一-鿿]")
 OPTION_MARK = re.compile(r"(?:^|[\s|*(（])\(?([a-dA-D])[.)、:：）]\**\s")
@@ -235,7 +251,7 @@ def strip_option_tables(text):
             j += 1
         block = lines[i:j]
         marks = {m.group(1).lower() for row in block for m in OPTION_MARK.finditer(row)}
-        if len(marks) >= 2 or OPTION_HEADER.search(block[0]):
+        if len(marks) >= 2 or OPTION_HEADER.search(to_simp(block[0])):
             for k in range(i, j):
                 lines[k] = ""
         i = j
@@ -254,7 +270,7 @@ def neutralize(text):
         out.append(text[pos:m.start()])
         inner = m.group(0)[1:-1]
         head = text[max(0, m.start() - 12):m.start()]
-        out.append(" " if len(inner) <= SHORT_QUOTE or ATTRIBUTION.search(head) else m.group(0))
+        out.append(" " if len(inner) <= SHORT_QUOTE or ATTRIBUTION.search(to_simp(head)) else m.group(0))
         pos = m.end()
     out.append(text[pos:])
     return "".join(out)

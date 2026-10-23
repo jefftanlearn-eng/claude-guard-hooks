@@ -2,14 +2,14 @@
 
 **不让 Claude Code 再说「做完了」，其实没做。**
 
-4 个 Claude Code hook，Python 3.8+，只用标准库，Windows / macOS / Linux 都能用。装上之后，Claude 想说「已修复」「测试通过」「做不到」「已推送」的时候，要先拿出证据，否则会被拦下来，让它回去补做。
+4 个 Claude Code hook，Python 3.8+，只用标准库，Windows / macOS / Linux 都能用。装上之后，Claude 想说「已修复」「测试通过」「做不到」「已推送」的时候，要先拿出证据，否则会被拦下来，让它回去补做。简体、繁体（台湾）、英文的说法都认。
 
 | Hook | 什么时候触发 | 抓什么 |
 |---|---|---|
 | `stop_claim_audit.py` | Claude 回复结束时（Stop） | 说「已修复 / 测试通过 / 已推送 / 已派子代理 / 找到根因」，但这一轮根本没调用过对应的工具 |
 | `stop_retreat_gate.py` | Claude 回复结束时（Stop） | 说「做不到 / 换个方向 / 先放着」，但没列出自己试过哪几条路 |
-| `pre_pipe_exitcode.py` | 执行 Bash 之前（PreToolUse） | `npm test \| tail -5 && git commit` 这种测试红了照样提交的命令 |
-| `pre_push_secret_scan.py` | 执行 Bash 之前（PreToolUse） | `git push` 前，要推上去的 commit 里有 API key、私钥、`.env` |
+| `pre_pipe_exitcode.py` | 执行 Bash / PowerShell 命令之前（PreToolUse） | `npm test \| tail -5 && git commit` 这种测试红了照样提交的命令 |
+| `pre_push_secret_scan.py` | 执行 Bash / PowerShell 命令之前（PreToolUse） | `git push` 前，要推上去的 commit 里有 API key、私钥、`.env` |
 
 ---
 
@@ -33,7 +33,7 @@
 
 然后它会去真的跑测试，或者老实改成「改好了，还没跑测试」。
 
-检查的说法（中英文都认）：已修复 / 修好了 / 测试通过 / 全绿 / tests pass、已完成 / 做完了、找到根因、跑过 / 验证过、已提交 / 已推送、已派子代理、正在后台跑、已下载 / 看过。
+检查的说法（简体、繁体、英文都认，例如「已修復，測試全部通過」「正在背景執行」也会拦）：已修复 / 修好了 / 测试通过 / 全绿 / tests pass、已完成 / 做完了、找到根因、跑过 / 验证过、已提交 / 已推送、已派子代理、正在后台跑、已下载 / 看过。
 「修好 / 测试通过 / 完成」这几类，**验证必须发生在最后一次改档之后**：先跑测试、再改代码、再说「修好了」，一样会被拦。
 
 不会拦：未来式（「接下来要跑」「I will push」）、问句（「测试通过了吗？」）、引用用户的话、行内代码、选项表里的选项、上一轮跑过这一轮才报告的结果。
@@ -100,7 +100,7 @@ npm test 2>&1 | tail -5; [ ${PIPESTATUS[0]} -eq 0 ] && git commit -m "fix"
 ```
 
 扫描范围：还没推上任何远端的 commit 的新增行（没有远端时扫最近 3 个 commit），以及新加入的 `.env`、`*.pem`、`id_rsa` 等文件。认得：`sk-` 类 API key、Stripe、AWS、GitHub、Google、Slack token、私钥块、JWT、Bearer token。只显示前 8 个字符，不会把整把 key 印出来。
-支持 `cd 某目录 && git push` 和 `git -C 某目录 push`。
+支持 `cd 某目录 && git push`、`git -C 某目录 push`，以及 PowerShell 的 `Set-Location 某目录; git push`。
 
 ---
 
@@ -142,7 +142,7 @@ macOS / Linux：
       ] }
     ],
     "PreToolUse": [
-      { "matcher": "Bash", "hooks": [
+      { "matcher": "Bash|PowerShell", "hooks": [
         { "type": "command", "command": "python3 ~/.claude/claude-guard-hooks/hooks/pre_pipe_exitcode.py", "timeout": 10 },
         { "type": "command", "command": "python3 ~/.claude/claude-guard-hooks/hooks/pre_push_secret_scan.py", "timeout": 30 }
       ] }
@@ -163,7 +163,7 @@ Windows（路径用正斜线，有空格就加引号）：
       ] }
     ],
     "PreToolUse": [
-      { "matcher": "Bash", "hooks": [
+      { "matcher": "Bash|PowerShell", "hooks": [
         { "type": "command", "command": "python \"C:/Users/<你>/.claude/claude-guard-hooks/hooks/pre_pipe_exitcode.py\"", "timeout": 10 },
         { "type": "command", "command": "python \"C:/Users/<你>/.claude/claude-guard-hooks/hooks/pre_push_secret_scan.py\"", "timeout": 30 }
       ] }
@@ -171,6 +171,8 @@ Windows（路径用正斜线，有空格就加引号）：
   }
 }
 ```
+
+**为什么 matcher 是 `Bash|PowerShell`？** Windows 上 Claude Code 可能用 PowerShell 工具执行命令（没装 Git Bash 时根本没有 Bash 工具），只写 `Bash` 的话这两个 hook 永远不会被调用。v0.1.0 装过的人请把 `"matcher": "Bash"` 改成 `"Bash|PowerShell"`。
 
 **python 还是 python3？** 在终端打 `python3 --version`，有版本号就用 `python3`；Windows 通常是 `python`（或 `py`）。版本要 3.8 以上。
 
@@ -212,7 +214,7 @@ python3 tests/run_tests.py
 - 声称对账只检查「有没有调用过对应的工具」，**不检查工具输出是不是真的支持那句话**。跑了测试、测试是红的、还说「全绿」，它抓不到。
 - 密钥扫描只认常见格式；自定义格式的密码、内网地址、个人资料都不会被认出来。它不能替代 `.gitignore`、密钥管理和 GitHub 的 secret scanning。已经推上去的密钥要当作外泄，立刻换新。
 - 每个 hook 自己出错（读不到 transcript、git 不在、输入格式不对）一律**放行**，不会卡住你的 session；Stop hook 同一轮最多拦 2 次。
-- 规则偏向中文（简体）和英文的说法，其他语言基本不会触发。
+- 规则认中文（简体、繁体／台湾用语）和英文的说法，其他语言基本不会触发。繁体是逐字折回简体再比对，台湾特有的说法目前只收了「修正」「背景執行」「計畫」等少数几个，漏掉的欢迎回报。
 
 ---
 
@@ -222,8 +224,12 @@ python3 tests/run_tests.py
 
 - `stop_claim_audit.py` (Stop): the reply claims "fixed / tests pass / pushed / dispatched a subagent / found the root cause" but no matching tool ran this turn. For "fixed / tests pass / done", verification must come *after* the last file edit.
 - `stop_retreat_gate.py` (Stop): the reply says "can't be done / change direction / shelve it" without a `Tried paths:` table (`| Path | Mechanism | Evidence | Result |`, >= 3 rows). Option/question tables, blockquotes, inline code and quoted user words are ignored.
-- `pre_pipe_exitcode.py` (PreToolUse, Bash): `npm test | tail -5 && git commit` — `&&` checks `tail`'s exit code, so failing tests still get committed. `CGH_PIPE_STRICT=1` also blocks any test command piped into tail/head.
-- `pre_push_secret_scan.py` (PreToolUse, Bash): before `git push`, scans lines added by commits not yet on any remote, plus newly added `.env` / key files.
+- `pre_pipe_exitcode.py` (PreToolUse, Bash and PowerShell): `npm test | tail -5 && git commit` — `&&` checks `tail`'s exit code, so failing tests still get committed. `CGH_PIPE_STRICT=1` also blocks any test command piped into tail/head.
+- `pre_push_secret_scan.py` (PreToolUse, Bash and PowerShell): before `git push`, scans lines added by commits not yet on any remote, plus newly added `.env` / key files.
+
+**Languages:** Chinese rules match both Simplified and Traditional (Taiwan) text, plus English.
+
+**Windows:** the PreToolUse matcher is `Bash|PowerShell`, because Claude Code on Windows may run commands through its PowerShell tool (and registers no Bash tool without Git Bash). If you installed v0.1.0, change `"matcher": "Bash"` to `"Bash|PowerShell"`.
 
 **Install:** copy the folder somewhere stable, run `python3 install.py` (Windows: `python install.py`) to print a settings.json snippet with this machine's paths (it writes nothing), merge it into `~/.claude/settings.json`, then run `python3 tests/run_tests.py`.
 

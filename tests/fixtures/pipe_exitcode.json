@@ -26,5 +26,9 @@
   {"name": "PIPESTATUS 显式取码", "expect": "pass",
    "command": "npm test 2>&1 | tail -5; [ ${PIPESTATUS[0]} -eq 0 ] && git commit -m x"},
   {"name": "注释里的管道", "expect": "pass",
-   "command": "npm test && git commit -m x  # not: npm test | tail && git commit"}
+   "command": "npm test && git commit -m x  # not: npm test | tail && git commit"},
+
+  {"name": "PowerShell：Select-Object 吃掉退出码 && git push", "expect": "block", "tool": "PowerShell", "command": "npm test 2>&1 | Select-Object -Last 5 && git push"},
+  {"name": "PowerShell：Select-Object 后看 $?", "expect": "block", "tool": "PowerShell", "command": "pytest | Select-Object -Last 5; if ($?) { git commit -m fix }"},
+  {"name": "PowerShell：直接看 $LASTEXITCODE（放行）", "expect": "pass", "tool": "PowerShell", "command": "npm test; if ($LASTEXITCODE -eq 0) { git push }"}
 ]

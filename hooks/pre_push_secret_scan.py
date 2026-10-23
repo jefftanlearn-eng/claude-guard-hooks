@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse hook (matcher: Bash): scan outgoing commits for secrets before `git push`.
+"""PreToolUse hook (matcher: Bash|PowerShell): scan outgoing commits for secrets before `git push`.
 
 Looks at lines ADDED by commits that are not on any remote yet (falls back to the
 last 3 commits), plus newly added files named like .env / *.pem / id_rsa.
@@ -38,7 +38,7 @@ COMPILED = [(n, re.compile(p)) for n, p in PATTERNS]
 SECRET_FILE = re.compile(r"(?:^|/)(?:\.env(?:\.[\w-]+)?|id_rsa|id_ed25519|[^/]*\.pem|[^/]*\.p12|credentials\.json)$")
 SAFE_FILE = re.compile(r"\.(?:example|sample|template|dist)$|\.pub$")
 PUSH = re.compile(r"(?:^|[;&|\n]\s*)git(?:\s+-C\s+(\"[^\"]+\"|'[^']+'|\S+))?(?:\s+-c\s+\S+)*\s+push\b")
-CD = re.compile(r"(?:^|&&|;)\s*cd\s+(\"[^\"]+\"|'[^']+'|[^\s;&]+)")
+CD = re.compile(r"(?:^|&&|;)\s*(?:cd|Set-Location|Push-Location|sl|pushd)\s+(?:-(?:Literal)?Path\s+)?(\"[^\"]+\"|'[^']+'|[^\s;&]+)", re.I)
 
 
 def to_native(p):

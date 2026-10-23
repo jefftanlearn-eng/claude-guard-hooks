@@ -14,8 +14,10 @@ HERE = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
 HOOKS = {
     "claim": ("Stop", None, "stop_claim_audit.py", 10),
     "retreat": ("Stop", None, "stop_retreat_gate.py", 10),
-    "pipe": ("PreToolUse", "Bash", "pre_pipe_exitcode.py", 10),
-    "secret": ("PreToolUse", "Bash", "pre_push_secret_scan.py", 30),
+    # PowerShell: on Windows Claude Code may run shell commands through its PowerShell tool
+    # (and without Git Bash it registers no Bash tool at all). Same tool_input.command field.
+    "pipe": ("PreToolUse", "Bash|PowerShell", "pre_pipe_exitcode.py", 10),
+    "secret": ("PreToolUse", "Bash|PowerShell", "pre_push_secret_scan.py", 30),
 }
 
 

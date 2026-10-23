@@ -26,7 +26,7 @@ BAD = re.compile(
     r"做不到|做不了|办不到|没办法|无法(?:实现|做到|解决|完成|处理)"
     r"|就是这样|本来就这样|天生(?:就)?这样"
     r"|建议改回|改回|改用别的|换个方向|换一个方向|换条路|换个(?:思路|做法|方案)(?:吧|好了)"
-    r"|先放着|先搁置|先跳过|暂时放弃|放弃(?:这条|这个|它)|这条路不通|走不通|行不通"
+    r"|先放着|先搁着|先搁置|先跳过|暂时放弃|放弃(?:这条|这个|它)|这条路不通|走不通|行不通"
     r"|要不(?:然)?就(?:不做|算了|换)|不如(?:换|改|放弃)"
     r"|can'?t be done|cannot be done|not possible|isn'?t possible|is impossible"
     r"|give up on|let'?s (?:drop|shelve|park) (?:it|this)|(?:shelve|park) (?:it|this) for now",
@@ -40,13 +40,13 @@ HEADER = re.compile(r"^\s*\|\s*路\s*\|\s*机制\s*\|\s*证据\s*\|\s*结果\s*\
 
 # The user asked to stop / change direction: allowed.
 USER_OK = re.compile(
-    r"改方向|换(?:个|一个|条)?(?:方向|路|方案|做法)|改回|算了|不做了|放弃|先放着|搁置|别做了|停(?:掉|下)?吧|换成"
+    r"改方向|换(?:个|一个|条)?(?:方向|路|方案|做法)|改回|算了|不做了|放弃|先放着|搁着|搁置|别做了|停(?:掉|下)?吧|换成"
     r"|change (?:direction|approach)|give up|drop it|skip it|shelve|park it|revert to|switch to",
     re.I,
 )
 
 VAGUE = re.compile(r"做不到|做不了|办不到|没办法")
-SHELVE = re.compile(r"先放着|先搁置|先跳过|暂时放弃|放弃(?:这条|这个|它)|建议改回|改回|改用别的|换个方向|换一个方向|换条路"
+SHELVE = re.compile(r"先放着|先搁着|先搁置|先跳过|暂时放弃|放弃(?:这条|这个|它)|建议改回|改回|改用别的|换个方向|换一个方向|换条路"
                     r"|不如(?:换|改|放弃)|要不(?:然)?就(?:不做|算了|换)|let'?s (?:drop|shelve|park)|(?:shelve|park) (?:it|this)", re.I)
 NEG_BEFORE = re.compile(r"(?:不是|并非|并不是|没说|不说|不算|不叫)\s*(?:在)?\s*(?:说|讲|是)?\s*$|(?:not|never)\s+(?:saying\s+)?(?:that\s+)?(?:it\s+)?$", re.I)
 FILLER = re.compile(r"所以|因此|于是|实在|恐怕|看来|确实|还是|真的|根本|也|就|都|还|而且|但是|可是|不过")
@@ -92,6 +92,7 @@ def find_hit(s):
 
 
 def has_tried_table(reply):
+    reply = c.to_simp(reply)
     if not MARK.search(reply):
         return False
     hm = HEADER.search(reply)
@@ -133,16 +134,18 @@ def main():
     reply = c.last_assistant_text(data, rows)
     if not reply or has_tried_table(reply):
         return 0
-    hit = find_hit(c.neutralize(reply))
-    if not hit:
+    raw = c.neutralize(reply)
+    m = find_hit(c.to_simp(raw))  # rules are written in Simplified; Traditional is folded 1:1 per char
+    if not m:
         return 0
-    if USER_OK.search(c.recent_user_text(rows)):
+    hit = raw[m.start():m.end()]
+    if USER_OK.search(c.to_simp(c.recent_user_text(rows))):
         return 0
     if not c.allow_block("retreat", data):
         return 0
-    c.log_event("retreat_gate", hit.group(0))
+    c.log_event("retreat_gate", hit)
     n = c.env_int("RETREAT_MIN_PATHS", 3)
-    reason = MSG_ZH.format(hit=hit.group(0), n=n) + "\n" + MSG_EN.format(hit=hit.group(0), n=n)
+    reason = MSG_ZH.format(hit=hit, n=n) + "\n" + MSG_EN.format(hit=hit, n=n)
     print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
     return 0
 

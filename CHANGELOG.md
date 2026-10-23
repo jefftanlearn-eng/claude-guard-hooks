@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.0 — 2026-10-23
+
+- 繁体中文（台湾）：两个 Stop hook 先把回复逐字从繁体折回简体再比对（`_common.to_simp`，一对一不改长度，命中的原文照样显示），所以「已修復，測試全部通過」「先放著」「沒辦法」都会拦；豁免规则（未来式「接下來要…」、否定「還沒…」、问句「…嗎？」、「使用者說」引用、「選項」表头、「可以改回來」、「題 3 你還沒答」、「已試路徑」表）也同样认繁体，避免误拦。
+- 补了几个台湾用语：「已修正」、「背景執行」（后台任务）、「計畫」（未来式）、「先擱著」、「使用者」（引用归属）。
+- PowerShell：`install.py` 生成的 PreToolUse matcher 从 `Bash` 改为 `Bash|PowerShell`。Windows 上 Claude Code 用 PowerShell 工具执行命令时，`pre_pipe_exitcode` 和 `pre_push_secret_scan` 以前根本不会被调用。**v0.1.0 用户请手动改 settings.json 里的 matcher。**
+- `pre_push_secret_scan` 认得 PowerShell 的 `Set-Location` / `Push-Location` / `sl` 进入目录；声称对账把后台执行的 PowerShell 也算作后台任务证据。
+- 测试 86 → 139 条：每个繁体说法都有「会拦 / 不会拦」用例、PowerShell 用例、matcher 检查，以及「规则里每个汉字的台湾繁体都能折回简体」的覆盖检查（装了 opencc 才跑）。
+
+
 ## v0.1.0 — 2026-10-22
 
 首个版本 / First release.

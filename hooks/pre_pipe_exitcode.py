@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse hook (matcher: Bash): a pipe ending in tail/head swallows the exit code.
+"""PreToolUse hook (matcher: Bash|PowerShell): a pipe ending in tail/head swallows the exit code.
 
     npm test 2>&1 | tail -5 && git commit -m "fix"
 

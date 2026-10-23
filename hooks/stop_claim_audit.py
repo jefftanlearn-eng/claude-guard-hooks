@@ -28,7 +28,7 @@ LOOK = RUN | {"Read", "Grep", "Glob", "WebFetch", "mcp__"}
 # (label, pattern, tools that count as evidence, evidence must follow the last edit?, tip)
 CLAIMS = [
     ("修好 / 测试通过 fixed / tests pass", re.compile(
-        r"已(?:经)?(?:修复|修好|解决)|修好了|修复(?:完成|好了)|bug\s*(?:已|已经)?(?:修|解决)(?:好|掉)?了"
+        r"已(?:经)?(?:修复|修好|修正|解决)|修好了|修复(?:完成|好了)|bug\s*(?:已|已经)?(?:修|解决)(?:好|掉)?了"
         r"|测试(?:已|全部|都)?(?:通过|过了|全绿)|全绿|(?:all\s+)?(?:\d+\s+)?tests?\s+(?:now\s+)?pass(?:ed|es|ing)?\b"
         r"|\b(?:is|are|now)\s+(?:now\s+)?fixed\b|\bI(?:'ve| have)\s+fixed\b", re.I),
      RUN, True, "要宣布修好 / 测试通过，最后一次改档之后必须真的跑过验证命令。"),
@@ -53,7 +53,7 @@ CLAIMS = [
         r"|\bI(?:'ve| have)\s+(?:dispatched|launched|spawned|started)\s+(?:a|an|the|\d+)?\s*(?:sub-?)?agents?\b", re.I),
      {"Agent", "Task"}, False, "要么真的调用 Agent 派出去，要么改成「接下来要派…」。"),
     ("后台任务 background", re.compile(
-        r"(?:已经?|正在)\s*(?:放|丢|挂)?(?:到|在)?后台(?:跑|运行|执行|处理)|后台(?:已经?|正在)\s*(?:跑|查|抓|做|运行)"
+        r"(?:已经?|正在)\s*(?:放|丢|挂)?(?:到|在)?(?:后台|背景)(?:跑|运行|执行|处理)|(?:后台|背景)(?:已经?|正在)\s*(?:跑|查|抓|做|运行|执行)"
         r"|\b(?:is|are|now)\s+running\s+in\s+the\s+background\b", re.I),
      {"Agent", "Task", "Bash:background"}, False, "后台任务要有 Agent 或后台 Bash 的记录；没有就改成未来式。"),
     ("下载 / 读过 downloaded / read", re.compile(
@@ -63,7 +63,7 @@ CLAIMS = [
 ]
 
 FUTURE = re.compile(
-    r"(?:接下来|等下|稍后|待会|马上|现在就|打算|准备|将要|将会|要不要|该不该|需要|应该|想|计划|如果|等)\s*(?:要|会|去|得|该)?\s*$"
+    r"(?:接下来|等下|稍后|待会|马上|现在就|打算|准备|将要|将会|要不要|该不该|需要|应该|想|计划|计画|如果|等)\s*(?:要|会|去|得|该)?\s*$"
     r"|(?:要|会|去|得|该|能|可以|才算|才能)\s*$|(?:没有?|未|尚未|还没|不曾|不能|别)\s*(?:有)?\s*$"
     r"|\b(?:will|'ll|going\s+to|need\s+to|should|must|can|could|to|not|haven'?t|hasn'?t|once|after|before|if|until|when)\s+(?:be\s+)?$",
     re.I,
@@ -87,7 +87,8 @@ def has_evidence(calls, wanted, after_edit):
 
 
 def audit(reply, calls):
-    text = c.neutralize(reply)
+    raw = c.neutralize(reply)
+    text = c.to_simp(raw)  # Traditional -> Simplified, 1:1 per char, so positions stay aligned with raw
     misses = []
     for label, pat, wanted, after_edit, tip in CLAIMS:
         if has_evidence(calls, wanted, after_edit):
@@ -97,7 +98,7 @@ def audit(reply, calls):
                 continue
             if QUESTION_AFTER.search(text[m.end():m.end() + 12]):
                 continue
-            misses.append((label, m.group(0).strip(), wanted, after_edit, tip))
+            misses.append((label, raw[m.start():m.end()].strip(), wanted, after_edit, tip))
             break
     return misses
 
