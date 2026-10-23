@@ -119,14 +119,25 @@ def main():
     if not hits:
         return 0
     c.log_event("secret_scan", hits[0][:30])
-    sys.stderr.write(
-        "密钥扫描闸：要 push 的 commit 里疑似有密钥，push 已挡下。\n" + "\n".join(hits) + "\n"
+    lang = c.pick_lang(data=data)  # no reply yet: use Claude's latest text in the transcript
+    sys.stderr.write(MSG[lang].format(hits="\n".join(hits)))
+    return 2
+
+
+MSG = {
+    "zh": (
+        "密钥扫描闸：要 push 的 commit 里疑似有密钥，push 已挡下。\n{hits}\n"
         "处理：把密钥移到 .env（并加进 .gitignore），改写掉那个 commit 后再 push；已经推上去过的密钥要当作外泄，立刻去后台换新。\n"
         "确认是误报（例如故意公开的 key）：设 CGH_SECRET_ALLOW=<正则> 放行，或由你自己手动 push。\n"
-        "EN: Outgoing commits look like they contain secrets; push blocked. Move them to .env, rewrite the commit, "
-        "rotate anything already pushed. False positive? Set CGH_SECRET_ALLOW=<regex> or push manually.\n"
-    )
-    return 2
+    ),
+    "en": (
+        "Secret scan gate: the commits about to be pushed look like they contain secrets, so the push was blocked.\n{hits}\n"
+        "What to do: move the secret into .env (and add .env to .gitignore), rewrite that commit, then push again. "
+        "Treat any secret that was already pushed as leaked and rotate it in the provider's dashboard right away.\n"
+        "Sure it is a false positive (for example a key that is public on purpose)? Set CGH_SECRET_ALLOW=<regex> "
+        "to let it through, or push it yourself by hand.\n"
+    ),
+}
 
 
 if __name__ == "__main__":

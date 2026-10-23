@@ -206,6 +206,74 @@ def last_assistant_text(data, rows):
     return "\n".join(parts).strip()
 
 
+# ── output language ───────────────────────────────────────────────────────
+# Block messages are printed in ONE language: "zh" (Simplified Chinese) or "en".
+#   1) CGH_LANG=en / CGH_LANG=zh overrides everything.
+#   2) Otherwise look at what Claude wrote: the reply being checked (Stop hooks) or the most
+#      recent assistant text in the transcript (PreToolUse hooks; if Claude has said nothing yet,
+#      the user's latest message). No text / unreadable = "en".
+# Rule: drop code, URLs and 「quoted」 bits, then count CJK ideographs against Latin WORDS
+# (one Chinese character carries about as much as one English word, not one letter).
+# zh when CJK chars make up >= 30% of (CJK chars + Latin words). So a Chinese reply
+# full of English tool names stays zh, and an English reply quoting one Chinese word stays en.
+LANG_ZH_SHARE = 0.30
+_LANG_STRIP = re.compile(r"```.*?(?:```|\Z)|`[^`\n]*`|https?://\S+|「[^」\n]*」|『[^』\n]*』", re.S)
+# File names, paths and snake_case identifiers are not English prose: "改了 stop_claim_audit.py" is Chinese.
+_LANG_IDENT = re.compile(r"[A-Za-z0-9:]*[\/_][\w.\-:\/]*|\b[A-Za-z0-9\-]+\.[A-Za-z0-9]+\b")
+_CJK_CHAR = re.compile(r"[㐀-䶿一-鿿豈-﫿]")
+_LATIN_WORD = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
+
+
+def detect_lang(text):
+    """'zh' or 'en' for a piece of assistant text (no env override here)."""
+    if not isinstance(text, str) or not text.strip():
+        return "en"
+    s = _LANG_IDENT.sub(" ", _LANG_STRIP.sub(" ", text))
+    cjk = len(_CJK_CHAR.findall(s))
+    words = len(_LATIN_WORD.findall(s))
+    return "zh" if cjk and cjk >= LANG_ZH_SHARE * (cjk + words) else "en"
+
+
+def _lang_units(text):
+    s = _LANG_IDENT.sub(" ", _LANG_STRIP.sub(" ", text))
+    return len(_CJK_CHAR.findall(s)) + len(_LATIN_WORD.findall(s))
+
+
+def recent_assistant_text(rows, max_chars=600, enough_units=5):
+    """Most recent main-thread assistant text in the transcript. Newest first, and it stops as
+    soon as the newest text says enough to judge the language (>= enough_units CJK chars + Latin
+    words), so a short new Chinese line is not outvoted by an older long English one.
+    Tool calls, tool results and malformed blocks are skipped. '' if there is none."""
+    parts, size, units = [], 0, 0
+    for row in reversed(rows or []):
+        if row.get("type") != "assistant" or row.get("isSidechain"):
+            continue
+        for t in reversed(_texts(row)):
+            if isinstance(t, str) and t.strip():
+                parts.insert(0, t)
+                size += len(t)
+                units += _lang_units(t)
+        if units >= enough_units or size >= max_chars:
+            break
+    return "\n".join(parts)
+
+
+def pick_lang(text=None, data=None):
+    """Output language for a block message. Stop hooks pass the reply as `text`; PreToolUse
+    hooks pass the hook input as `data` and the transcript at data['transcript_path'] is read."""
+    forced = (os.environ.get(PREFIX + "LANG") or "").strip().lower()[:2]  # zh, zh-TW, zh_CN, en...
+    if forced in ("en", "zh"):
+        return forced
+    if text is None:
+        try:
+            rows = load_rows((data or {}).get("transcript_path"))
+            # Claude may run a command before saying anything: then go by what the user typed.
+            text = recent_assistant_text(rows) or recent_user_text(rows, lookback=1)
+        except Exception:  # noqa: BLE001 - never let language detection break a block
+            text = ""
+    return detect_lang(text)
+
+
 # ── text that should not count as the assistant's own claim ───────────────
 FENCE = re.compile(r"```.*?(?:```|\Z)", re.S)
 INLINE_CODE = re.compile(r"`[^`\n]+`")

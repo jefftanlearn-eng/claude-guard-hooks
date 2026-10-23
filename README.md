@@ -9,6 +9,7 @@ The "No shortcuts" hook pack (repo name: `claude-guard-hooks`) is a set of 4 Cla
 - Python 3.8 or newer, standard library only. Works on Windows, macOS and Linux.
 - Nothing extra to type. Use Claude Code the way you do now; the hooks only step in when Claude claims "fixed", "tests pass", "can't be done" or "pushed" without the evidence to back it up.
 - Understands English, Simplified Chinese and Traditional Chinese (Taiwan) phrasing.
+- Block messages come in one language, matching the conversation: English when Claude is writing English, Simplified Chinese when it is writing Chinese (see [Message language](#message-language)).
 
 | Hook | When it runs | What it catches |
 |---|---|---|
@@ -21,28 +22,27 @@ The "No shortcuts" hook pack (repo name: `claude-guard-hooks`) is a set of 4 Cla
 
 ## What each hook catches (before and after)
 
-Most block messages are in Chinese with an English line (starting with `EN:`) at the end. The examples below show the real text the hooks print, followed by what it means.
+The examples below show the real text the hooks print when the conversation is in English. In a Chinese conversation the same message is printed in Chinese instead (see [Message language](#message-language)).
 
 ### 1. Claim check: `stop_claim_audit.py`
 
 **Before:** Claude edits a file, then replies:
 
-> Fixed. All tests pass.
+> Fixed the login bug. All 12 tests pass now.
 
 It never ran the tests in this turn.
 
 **After:** the reply is stopped and Claude receives:
 
 ```
-声称对账闸：回复里有「已经做了」的说法，但 transcript 里找不到对应的工具调用。
-- 修好 / 测试通过 fixed / tests pass：你写了「All tests pass」，但最后一次改档之后没有调用过 Agent/Bash/PowerShell/Task。要宣布修好 / 测试通过，最后一次改档之后必须真的跑过验证命令。
-二选一：① 现在真的去做（调用工具，贴出命令和输出）；② 把话改成未来式（「接下来要…」「还没跑」）。
-EN: Your reply claims work is done ("All tests pass") but no matching tool call is in this turn. Either run it now and show the output, or rewrite it as a plan.
+Claim audit: your reply says some work is already done, but the transcript has no matching tool call.
+- fixed / tests pass: you wrote "All 12 tests pass", but there was no Agent/Bash/PowerShell/Task call after your last file edit. To say something is fixed or tests pass, a check command must actually run after your last file edit.
+Pick one: (1) do it now (call the tool, show the command and its output); (2) rewrite it as a plan ("next I will...", "not run yet").
 ```
 
-In short: you claimed "All tests pass", but after your last file edit you didn't call Agent, Bash, PowerShell or Task. Either run it now and show the output, or rewrite the sentence as something you will do ("next I'll run…", "not run yet"). Claude then usually runs the tests, or honestly says "changed it, haven't tested it yet".
+Claude then usually runs the tests, or honestly says "changed it, haven't tested it yet".
 
-Claims it checks (examples): "fixed", "tests pass", "all done", "I've finished", "found the root cause", "I've run / verified / tested", "I've committed / pushed", "pushed to origin", "I've dispatched a subagent", "is running in the background", "I've downloaded / read". The same claims in Chinese are checked too, for example 已修复 / 测试通过 / 已推送, and their Traditional forms such as 已修復，測試全部通過.
+Claims it checks (examples): "fixed", "tests pass", "all done", "I've finished", "found the root cause", "I've run / verified / tested", "I've committed / pushed", "pushed to origin", "I've dispatched a subagent", "is running in the background", "I've downloaded / read". Chinese phrasings it recognises (Simplified and Traditional): 已修复 / 测试通过 / 已推送 / 已修復.
 
 For "fixed", "tests pass" and "done", **the check must come after the last file edit**. Running the tests, then changing the code, then saying "fixed" is still blocked.
 
@@ -52,14 +52,19 @@ Not blocked: future tense ("I will push", "next I'll run the tests"), questions 
 
 **Before:**
 
-> I tried, but it can't be done. Let's park it for now.
+> This can't be done with the current PDF library, so let's shelve it for now.
 
 (It only tried one approach.)
 
-**After:** the reply is stopped. The message (Chinese, then an `EN:` line) tells Claude to come up with at least 3 approaches that work in genuinely different ways (rewording a prompt doesn't count as a new one), actually try each one somewhere safe (a temporary folder or a separate branch, without touching production or spending money), and only then report back with a tried-paths table. Changing the method is fine; changing the goal is the user's decision, so if everything fails Claude should offer "change the goal" as an option for you to choose. The English line reads:
+**After:** the reply is stopped and Claude receives:
 
 ```
-EN: You announced a retreat ("can't be done") without a tried-paths table. Try >= 3 different approaches, then add a line 'Tried paths:' and a table | Path | Mechanism | Evidence | Result |.
+Retreat gate: this reply says it can't be done / wants to change direction / shelve it (matched "can't be done"), but has no tried-paths table.
+Changing route means changing the method, not the goal; only the user can change the goal. First:
+1) come up with >= 3 approaches that work differently (rewording a prompt does not count as a new one);
+2) actually try each one in a temp directory or a separate branch (nothing in production, nothing that costs money);
+3) put a marker line "Tried paths:" in the reply, then the header | Path | Mechanism | Evidence | Result |, one row per approach;
+4) if every one still fails, attach the evidence and hand "change the goal" to the user as an option to decide.
 ```
 
 A reply that includes a table like this is let through:
@@ -73,9 +78,9 @@ Tried paths:
 | Write it ourselves | Code | Screenshot | Works, but 3x slower |
 ```
 
-The table needs at least 3 rows. The Chinese marker and header (`已试路径：` and `| 路 | 机制 | 证据 | 结果 |`) work too.
+The table needs at least 3 rows.
 
-Phrases it reacts to include "can't be done", "not possible", "give up on", "let's park / shelve / drop it", and Chinese ones such as 做不到 / 换个方向 / 先放着.
+Phrases it reacts to include "can't be done", "not possible", "give up on", "let's park / shelve / drop it". Chinese phrasings it recognises (plus the Chinese table marker 已试路径): 做不到 / 换个方向 / 先放着.
 
 Not blocked:
 - You yourself asked to stop, change direction or park it (for example "give up", "change approach", "skip it", "shelve");
@@ -98,13 +103,12 @@ npm test 2>&1 | tail -5 && git commit -m "fix" && git push
 **After:** the command is blocked before it runs, and Claude sees:
 
 ```
-管道退出码闸 / pipe exit-code gate: 这条命令的 && / $? 守不住它看起来守着的东西。
-管道以 `tail` 结尾，`&&` 看的是 `tail` 的退出码（几乎总是 0）。前面失败了，`git commit` 照样执行。
-EN: the pipe ends in `tail`, so `&&` sees its exit code (almost always 0); `git commit` runs even if the command before it failed.
-改法（任选一种） / Fix (pick one):
-  1. 去掉管道 / drop the pipe:            npm test && git commit ...
-  2. 开 pipefail / enable pipefail:       set -o pipefail; npm test 2>&1 | tail -5 && git commit ...
-  3. 取前段退出码 / check the real code:  npm test 2>&1 | tail -5; [ ${PIPESTATUS[0]} -eq 0 ] && git commit ...
+Pipe exit-code gate: the && / $? in this command does not guard what it looks like it guards.
+The pipe ends in `tail`, so `&&` sees the exit code of `tail` (almost always 0). If the command before it failed, `git commit` runs anyway.
+Fix (pick one):
+  1. Drop the pipe:          npm test && git commit ...
+  2. Enable pipefail:        set -o pipefail; npm test 2>&1 | tail -5 && git commit ...
+  3. Check the real code:    npm test 2>&1 | tail -5; [ ${PIPESTATUS[0]} -eq 0 ] && git commit ...
 ```
 
 Claude then retries with one of the three fixes.
@@ -120,16 +124,26 @@ Want it stricter? Set `CGH_PIPE_STRICT=1` and any test command piped into `tail`
 **After:** the `git push` is blocked:
 
 ```
-密钥扫描闸：要 push 的 commit 里疑似有密钥，push 已挡下。
+Secret scan gate: the commits about to be pushed look like they contain secrets, so the push was blocked.
   - sk-... API key (OpenAI / Anthropic style): sk-A1b2A...
-处理：把密钥移到 .env（并加进 .gitignore），改写掉那个 commit 后再 push；已经推上去过的密钥要当作外泄，立刻去后台换新。
-确认是误报（例如故意公开的 key）：设 CGH_SECRET_ALLOW=<正则> 放行，或由你自己手动 push。
-EN: Outgoing commits look like they contain secrets; push blocked. Move them to .env, rewrite the commit, rotate anything already pushed. False positive? Set CGH_SECRET_ALLOW=<regex> or push manually.
+What to do: move the secret into .env (and add .env to .gitignore), rewrite that commit, then push again. Treat any secret that was already pushed as leaked and rotate it in the provider's dashboard right away.
+Sure it is a false positive (for example a key that is public on purpose)? Set CGH_SECRET_ALLOW=<regex> to let it through, or push it yourself by hand.
 ```
 
 What it scans: lines added by commits that aren't on any remote yet (if the repo has no remote, the last 3 commits), plus newly added files such as `.env`, `*.pem` or `id_rsa`. It recognizes `sk-` style API keys (OpenAI / Anthropic), Stripe, AWS, GitHub, Google and Slack tokens, private key blocks, JWTs, and hex Bearer tokens. It only shows the first 8 characters of a match, never the whole key.
 
 It understands `cd some/dir && git push`, `git -C some/dir push`, and PowerShell's `Set-Location some\dir; git push`.
+
+### Message language
+
+Each block message is printed in **one** language, English or Simplified Chinese, following the conversation:
+
+- The Stop hooks look at the reply being checked. The PreToolUse hooks (pipe gate, secret scan) look at Claude's most recent text in the transcript.
+- Code blocks, inline code, URLs, corner-bracket quotes, file names, paths and snake_case identifiers are ignored. Then the message is in Chinese if CJK characters make up at least 30% of (CJK characters + English words); otherwise it is in English. An English reply that quotes one Chinese word stays English.
+- If Claude ran a command without writing anything first, the hook goes by your latest message instead. No text at all (or the transcript can't be read) means English.
+- `CGH_LANG=en` or `CGH_LANG=zh` forces one language (see [the settings table](#turn-off-tune-or-uninstall)).
+
+What gets blocked does not depend on the language; only the wording of the message changes.
 
 ---
 
@@ -153,11 +167,10 @@ python3 install.py      # macOS / Linux
 python install.py       # Windows
 ```
 
-The output starts with two lines of instructions (the first in Chinese, the second in English), then a JSON block, then the test command to run:
+The output is one line of instructions, then a JSON block, then the test command to run (JSON shortened here; `<your python>` and `<folder>` are full paths on your computer):
 
 ```
-把下面的 "hooks" 合并进 ~/.claude/settings.json（已有 hooks 的话，把条目加进对应数组，别整段覆盖）。
-Merge this "hooks" block into ~/.claude/settings.json (append to existing arrays; do not overwrite).
+Merge this "hooks" block into ~/.claude/settings.json (if you already have hooks, append these entries to the matching arrays; do not overwrite the whole block).
 
 {
   "hooks": {
@@ -166,8 +179,10 @@ Merge this "hooks" block into ~/.claude/settings.json (append to existing arrays
   }
 }
 
-装好后先跑测试 / then verify:  <your python> <folder>/tests/run_tests.py
+Then run the tests to check:  <your python> <folder>/tests/run_tests.py
 ```
+
+The two text lines are in English, or in Chinese if `CGH_LANG=zh` is set or your system locale is Chinese. The JSON is the same either way.
 
 Each `"command"` line contains the full path of the Python you ran it with, plus the full path of the hook file. Paths with spaces are wrapped in `\"…\"`. That's expected; keep them.
 
@@ -236,7 +251,7 @@ After saving, check the JSON is still valid: `python3 -m json.tool ~/.claude/set
 python3 tests/run_tests.py      # Windows: python tests\run_tests.py
 ```
 
-You'll see a long list of lines starting with `ok` (most test names are in Chinese). The last line should be `PASS: N/N passed` with both numbers equal (`PASS: 139/139 passed` in v0.2.0). Two lines may say a group was skipped, and neither is an error:
+You'll see a long list of lines starting with `ok` (many test names are in Chinese). The last line should be `PASS: N/N passed` with both numbers equal (`PASS: 187/187 passed` in v0.3.0). Two lines may say a group was skipped, and neither is an error:
 
 - `(opencc not installed - skipped)`: a check for developers only.
 - `git not installed - skipped`: git isn't installed, so the secret-scan tests are skipped.
@@ -260,7 +275,7 @@ This is a hook test. Please run this command exactly as written, without changin
 echo hello | tail -1 && git commit -m test
 ```
 
-Expected: the command does not run. You see `PreToolUse:Bash hook error` (or `PreToolUse:PowerShell` on Windows, which also counts), followed by a message starting with `管道退出码闸 / pipe exit-code gate` (shown in full in section 3 above). If you see `hello` or a git error instead, the command ran and the hook isn't loaded; check `/hooks`.
+Expected: the command does not run. You see `PreToolUse:Bash hook error` (or `PreToolUse:PowerShell` on Windows, which also counts), followed by a message starting with `Pipe exit-code gate:` (shown in full in section 3 above). If you see `hello` or a git error instead, the command ran and the hook isn't loaded; check `/hooks`.
 
 **Test B: the claim check.** Start a new conversation (`/clear`), then send:
 
@@ -269,13 +284,17 @@ This is a hook test. Don't use any tools, and don't put quotes around it. Reply 
 All tests pass.
 ```
 
-Expected: after Claude replies, a Stop hook message appears starting with `声称对账闸` ("claim check") and ending with `EN: Your reply claims work is done ("All tests pass") but no matching tool call is in this turn. …`. If Claude puts the sentence in quotes or a code block, it isn't checked (it's treated as quoting). If Claude ran any command earlier in the conversation, that counts as evidence, which is why you start with `/clear`.
+Expected: after Claude replies, a Stop hook message appears starting with `Claim audit: your reply says some work is already done, but the transcript has no matching tool call.` (shown in full in section 1 above). If Claude puts the sentence in quotes or a code block, it isn't checked (it's treated as quoting). If Claude ran any command earlier in the conversation, that counts as evidence, which is why you start with `/clear`.
 
 ---
 
-## Upgrading from v0.1
+## Upgrading
 
-v0.2.0 adds Traditional Chinese (Taiwan) phrasing (for example 已修復，測試全部通過) and makes the pipe gate and the secret scan also cover commands Claude runs through PowerShell. v0.1 only watched Bash, so on Windows those two hooks often never ran.
+v0.3.0 prints each block message in one language that follows the conversation (see [Message language](#message-language)) instead of Chinese plus an `EN:` line. What gets blocked did not change.
+
+**From v0.2:** close Claude Code, replace the old `claude-guard-hooks` folder with the new one **in the same location**, run the tests (step 4) and restart Claude Code. No settings change is needed: the settings `install.py` prints are the same as in v0.2.
+
+**From v0.1:** v0.2 added Traditional Chinese (Taiwan) phrasing and made the pipe gate and the secret scan also cover commands Claude runs through PowerShell. v0.1 only watched Bash, so on Windows those two hooks often never ran.
 
 1. Close Claude Code, then replace the old `claude-guard-hooks` folder with the new one **in the same location**. The paths in your settings stay valid.
 2. In `settings.json`, under `"PreToolUse"`, change the matcher above the `claude-guard-hooks` entries from `"matcher": "Bash"` to `"matcher": "Bash|PowerShell"`. If your two entries sit in two separate groups, change both. Don't touch hooks that belong to other tools.
@@ -300,6 +319,7 @@ Set environment variables. You can put them in the `"env"` section of `settings.
 | `CGH_PIPE_STRICT=1` | Also block any test command piped into tail/head |
 | `CGH_SECRET_ALLOW=<regex>` | Matches of this regular expression don't count as secrets (for example a key you publish on purpose) |
 | `CGH_LOG_FILE=<path>` | Writes one line per block (only the hook name and the matched phrase, never the reply text), to help you tune the rules |
+| `CGH_LANG=en` / `CGH_LANG=zh` | Forces the language of block messages and of `install.py`'s text (default: follow the conversation; `install.py` follows the system locale) |
 
 **To uninstall, the order matters:** first delete the `claude-guard-hooks` entries from `settings.json` (and any `Stop` / `PreToolUse` array left empty), restart Claude Code and confirm with `/hooks` that they're gone, and only then delete the folder. If you delete the folder first, the settings point to a file that no longer exists. Python then exits with an error code that Claude Code treats as "blocked", so no command can run and Claude can't finish its replies. The same happens if you move the folder; move it back, or redo steps 2 and 3.
 
@@ -311,7 +331,7 @@ Set environment variables. You can put them in the `"env"` section of `settings.
 - The claim check only checks **whether a matching tool was called**, not whether its output supports the claim. If Claude runs the tests, they fail, and it still says "all green", this won't catch it.
 - The secret scan only knows common key formats. Custom passwords, internal addresses and personal data are not recognized. It does not replace `.gitignore`, a secrets manager, or GitHub's secret scanning. Treat any key that has already been pushed as leaked and rotate it right away.
 - If a hook hits its own error (can't read the transcript, git isn't installed, unexpected input), it **lets things through** and never blocks your session. Stop hooks block at most 2 times per turn.
-- The rules understand Chinese (Simplified and Traditional / Taiwan) and English. Other languages will almost never trigger them. Traditional text is folded character by character into Simplified before matching; only a few Taiwan-specific phrases are covered so far (such as 修正, 背景執行, 計畫). Reports of missed phrases are welcome.
+- The rules understand Chinese (Simplified and Traditional / Taiwan) and English. Other languages will almost never trigger them. Traditional text is folded character by character into Simplified before matching; only a few Taiwan-specific phrases are covered so far. Reports of missed phrases are welcome. Messages are printed in English or Simplified Chinese only.
 - Everything runs on your own computer. The hooks contain no network code and upload nothing; the secret scan only runs local `git` commands.
 
 MIT License · Copyright (c) 2026 Verisance Corporation Sdn. Bhd.
@@ -341,7 +361,7 @@ MIT License · Copyright (c) 2026 Verisance Corporation Sdn. Bhd.
 
 **没装之前**：Claude 改了一个文件，然后回复：
 
-> 已修复，测试全部通过。
+> 登录的 bug 已修复，测试全部通过。
 
 可是这一轮它根本没跑测试。
 
@@ -349,9 +369,11 @@ MIT License · Copyright (c) 2026 Verisance Corporation Sdn. Bhd.
 
 ```
 声称对账闸：回复里有「已经做了」的说法，但 transcript 里找不到对应的工具调用。
-- 修好 / 测试通过 fixed / tests pass：你写了「已修复」，但最后一次改档之后没有调用过 Agent/Bash/PowerShell/Task。
+- 修好 / 测试通过：你写了「已修复」，但最后一次改档之后没有调用过 Agent/Bash/PowerShell/Task。要宣布修好 / 测试通过，最后一次改档之后必须真的跑过验证命令。
 二选一：① 现在真的去做（调用工具，贴出命令和输出）；② 把话改成未来式（「接下来要…」「还没跑」）。
 ```
+
+（本节的例子都是对话用中文时的输出；对话用英文时，同样的讯息会印成英文，见[讯息语言](#讯息语言)。）
 
 然后它会去真的跑测试，或者老实改成「改好了，还没跑测试」。
 
@@ -364,11 +386,22 @@ MIT License · Copyright (c) 2026 Verisance Corporation Sdn. Bhd.
 
 **没装之前**：
 
-> 试了一下，做不到，先放着吧。
+> 现在这个 PDF 库我做不到，先放着吧。
 
 （其实只试了一种方法。）
 
-**装了之后**：被拦下，Claude 被要求先想出至少 3 条机制不同的做法、真的试过，再在回复里附上：
+**装了之后**：被拦下，Claude 收到：
+
+```
+退路闸：这条回复宣布做不到 / 要改方向 / 先搁置（命中「做不到」），但没有附上「已试路径」表。
+换路只换手段，不换目标；目标只有用户能改。请先：
+1) 想出 >= 3 条机制不同的做法（只改提示词措辞不算新的一条）；
+2) 在临时目录或独立分支里真的试过每一条（不碰生产、不花钱）；
+3) 回复里放标记行「已试路径：」+ 表头 | 路 | 机制 | 证据 | 结果 |，每条一行；
+4) 都试过仍不行，再附上证据，把「换目标」作为选项交给用户决定。
+```
+
+回复里附上这样的表就放行：
 
 ```
 已试路径：
@@ -379,7 +412,7 @@ MIT License · Copyright (c) 2026 Verisance Corporation Sdn. Bhd.
 | 自己实现 | 代码 | 截图 | 可行但慢 3 倍 |
 ```
 
-有这张表（至少 3 行，英文表头 `| Path | Mechanism | Evidence | Result |` 也可以）就放行。
+表至少要 3 行；英文标记 `Tried paths:` 和表头 `| Path | Mechanism | Evidence | Result |` 也可以。
 
 不会拦：
 - 你自己说了「先放着 / 换方向 / 算了」；
@@ -399,13 +432,18 @@ npm test 2>&1 | tail -5 && git commit -m "fix" && git push
 
 `&&` 看的是 `tail` 的退出码（几乎永远是 0），测试红了，commit 和 push 照样执行。`pytest | tail; echo $?` 同理，印出来的是 `tail` 的码。
 
-**装了之后**：命令执行前被挡下，并给出三种改法：
+**装了之后**：命令执行前被挡下，Claude 看到：
 
-```bash
-npm test && git commit -m "fix"                                   # 去掉管道
-set -o pipefail; npm test 2>&1 | tail -5 && git commit -m "fix"   # 开 pipefail
-npm test 2>&1 | tail -5; [ ${PIPESTATUS[0]} -eq 0 ] && git commit -m "fix"
 ```
+管道退出码闸：这条命令的 && / $? 守不住它看起来守着的东西。
+管道以 `tail` 结尾，`&&` 看的是 `tail` 的退出码（几乎总是 0）。前面失败了，`git commit` 照样执行。
+改法（任选一种）：
+  1. 去掉管道：      npm test && git commit ...
+  2. 开 pipefail：   set -o pipefail; npm test 2>&1 | tail -5 && git commit ...
+  3. 取前段退出码：  npm test 2>&1 | tail -5; [ ${PIPESTATUS[0]} -eq 0 ] && git commit ...
+```
+
+然后它会换成三种改法之一重跑。
 
 只在「末段是 tail/head/tee/sort/wc 这类显示用的过滤器」**而且**右边是 commit / push / deploy / rm / publish 这类有后果的动作时才拦。`| grep -q X && …`、`&& echo done`、引号里的文字、已开 `pipefail` 都放行。
 想更严格：设 `CGH_PIPE_STRICT=1`，任何测试命令接 `| tail` / `| head` 都拦。
@@ -419,10 +457,23 @@ npm test 2>&1 | tail -5; [ ${PIPESTATUS[0]} -eq 0 ] && git commit -m "fix"
 ```
 密钥扫描闸：要 push 的 commit 里疑似有密钥，push 已挡下。
   - sk-... API key (OpenAI / Anthropic style): sk-A1b2A...
+处理：把密钥移到 .env（并加进 .gitignore），改写掉那个 commit 后再 push；已经推上去过的密钥要当作外泄，立刻去后台换新。
+确认是误报（例如故意公开的 key）：设 CGH_SECRET_ALLOW=<正则> 放行，或由你自己手动 push。
 ```
 
 扫描范围：还没推上任何远端的 commit 的新增行（没有远端时扫最近 3 个 commit），以及新加入的 `.env`、`*.pem`、`id_rsa` 等文件。认得：`sk-` 类 API key、Stripe、AWS、GitHub、Google、Slack token、私钥块、JWT、Bearer token。只显示前 8 个字符，不会把整把 key 印出来。
 支持 `cd 某目录 && git push`、`git -C 某目录 push`，以及 PowerShell 的 `Set-Location 某目录; git push`。
+
+### 讯息语言
+
+每则拦截讯息只印**一种**语言（英文或简体中文），跟着对话走：
+
+- Stop hook 看被检查的那段回复；PreToolUse hook（管道闸、密钥扫描）看 transcript 里 Claude 最近说的话。
+- 先去掉代码块、行内代码、网址、「」引号里的字、文件名、路径和 snake_case 名称，再数：汉字数 ≥（汉字数 + 英文词数）的 30% 就用中文，否则用英文。所以夹满英文工具名的中文回复仍是中文。
+- Claude 没说话就直接跑命令时，改看你最后一句话的语言；完全没有文字可判断（或读不到 transcript）才用英文。
+- 设 `CGH_LANG=zh` 或 `CGH_LANG=en` 可以强制指定（见下方[关掉或调整](#关掉或调整)）。
+
+拦什么跟语言无关，只有讯息的文字不同。
 
 ---
 
@@ -443,6 +494,23 @@ npm test 2>&1 | tail -5; [ ${PIPESTATUS[0]} -eq 0 ] && git commit -m "fix"
 python3 install.py      # macOS / Linux
 python install.py       # Windows
 ```
+
+输出是一行说明、一段 JSON、最后是测试命令（这里把 JSON 缩短了；`<你的 python>` 和 `<文件夹>` 会是你电脑上的完整路径）：
+
+```
+把下面的 "hooks" 合并进 ~/.claude/settings.json（已有 hooks 的话，把条目加进对应数组，别整段覆盖）。
+
+{
+  "hooks": {
+    "Stop": [ ... ],
+    "PreToolUse": [ ... ]
+  }
+}
+
+装好后先跑测试：  <你的 python> <文件夹>/tests/run_tests.py
+```
+
+系统语言是中文、或设了 `CGH_LANG=zh` 时，说明文字是中文；否则是英文。JSON 两种情况完全一样。
 
 只要其中几个：`python3 install.py --only claim,retreat`。
 
@@ -504,7 +572,17 @@ Windows（路径用正斜线，有空格就加引号）：
 python3 tests/run_tests.py
 ```
 
-最后一行显示 `PASS: N/N passed` 就对了。然后重开 Claude Code（或在 `/hooks` 里确认它们已载入）。
+最后一行显示 `PASS: N/N passed`（两个数字相同，v0.3.0 是 `PASS: 187/187 passed`）就对了。然后重开 Claude Code（或在 `/hooks` 里确认它们已载入）。
+
+---
+
+## 升级
+
+v0.3.0：每则拦截讯息只印一种语言，跟着对话走（见[讯息语言](#讯息语言)），不再是中文加一行 `EN:`。拦什么没变。
+
+**从 v0.2 升级**：关掉 Claude Code，用新文件夹**原地**替换旧的 `claude-guard-hooks` 文件夹，跑一次测试（第 4 步），再重开 Claude Code。settings.json 不用改：`install.py` 印出来的设定跟 v0.2 一样。
+
+**从 v0.1 升级**：同样原地替换文件夹，再把 settings.json 里 `"PreToolUse"` 下 `claude-guard-hooks` 那组的 `"matcher": "Bash"` 改成 `"Bash|PowerShell"`（两条分在两组的话两组都改，别动其他工具的 hook），检查 JSON、跑测试、重开 Claude Code，用 `/hooks` 确认。
 
 ---
 
@@ -525,6 +603,7 @@ python3 tests/run_tests.py
 | `CGH_PIPE_STRICT=1` | 测试命令接 tail/head 也拦 |
 | `CGH_SECRET_ALLOW=<正则>` | 符合这个正则的匹配不算密钥（例如故意公开的 key） |
 | `CGH_LOG_FILE=<路径>` | 每次拦截记一行（只记 hook 名和命中的词，不记回复内容），方便你调规则 |
+| `CGH_LANG=zh` / `CGH_LANG=en` | 强制拦截讯息和 `install.py` 说明文字的语言（默认：讯息跟着对话，`install.py` 跟着系统语言） |
 
 想永久移除某个 hook：把它那一条从 settings.json 删掉。
 

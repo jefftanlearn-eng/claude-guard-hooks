@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.0 — 2026-10-23
+
+Messages follow the language of the conversation. / 拦截讯息跟着对话语言走。
+
+- Every block message is now printed in **one** language, English or Simplified Chinese, instead of a Chinese paragraph plus a one-line `EN:` summary. The English text is a full message with the same detail (the claim list with tips, the four steps and the `Tried paths:` table header, the three pipe fixes, the secret-scan instructions).
+- How the language is chosen (`_common.pick_lang`, shared by all four hooks):
+  1. `CGH_LANG=en` or `CGH_LANG=zh` overrides everything (`zh-TW`, `zh_CN` count as `zh`).
+  2. Stop hooks look at the reply being checked; PreToolUse hooks (pipe gate, secret scan) look at Claude's most recent text in the transcript. No text, or no readable transcript, means English.
+  3. Code blocks, inline code, URLs and 「quoted」 text are ignored, then CJK characters are counted against Latin **words**. Chinese wins when CJK characters are at least 30% of (CJK characters + English words). A Chinese reply full of English tool names stays Chinese; an English reply that quotes one Chinese word stays English.
+- `install.py` prints its header and footer in English, or in Chinese when `CGH_LANG=zh` or the system locale is Chinese (`zh*`). The JSON snippet is unchanged.
+- What gets blocked is unchanged: no pattern, exemption or threshold was touched.
+- Tests 139 → 187: for each hook an English-reply case (output has no CJK characters), a Chinese-reply case and a `CGH_LANG` override case; PreToolUse with a missing transcript gives English; detector unit cases (file names, paths and snake_case identifiers do not count as English; the newest assistant line wins; if Claude has said nothing yet, the user's latest message decides; malformed transcript blocks are skipped); `install.py` in both languages with identical JSON.
+- 中文：每则讯息只印一种语言。`CGH_LANG=en|zh` 强制；Stop hook 看被检查的那段回复，PreToolUse hook 看 transcript 里 Claude 最近说的话，读不到就用英文。判定：去掉代码 / 网址 / 「引号」后，汉字数 ≥ (汉字数 + 英文词数) 的 30% 就用中文。拦什么完全没变。
+
 ## v0.2.0 — 2026-10-23
 
 - 繁体中文（台湾）：两个 Stop hook 先把回复逐字从繁体折回简体再比对（`_common.to_simp`，一对一不改长度，命中的原文照样显示），所以「已修復，測試全部通過」「先放著」「沒辦法」都会拦；豁免规则（未来式「接下來要…」、否定「還沒…」、问句「…嗎？」、「使用者說」引用、「選項」表头、「可以改回來」、「題 3 你還沒答」、「已試路徑」表）也同样认繁体，避免误拦。

@@ -78,7 +78,7 @@ def last_stage(pipeline):
 
 
 def check(cmd):
-    """Return a short explanation if the command should be blocked, else None."""
+    """Return {"zh": ..., "en": ...} explaining why the command should be blocked, else None."""
     cmd = strip_comments(mask_quoted(cmd))
     if AWARE.search(cmd):
         return None
@@ -90,31 +90,45 @@ def check(cmd):
                 continue
             m = CONSEQUENTIAL.search(" ".join(parts[i + 1:]))
             if m:
-                return ("管道以 `{0}` 结尾，`&&` 看的是 `{0}` 的退出码（几乎总是 0）。前面失败了，`{1}` 照样执行。\n"
-                        "EN: the pipe ends in `{0}`, so `&&` sees its exit code (almost always 0); `{1}` runs even if the "
-                        "command before it failed.".format(sw, m.group(0).strip()))
+                act = m.group(0).strip()
+                return {"zh": "管道以 `{0}` 结尾，`&&` 看的是 `{0}` 的退出码（几乎总是 0）。前面失败了，`{1}` 照样执行。".format(sw, act),
+                        "en": "The pipe ends in `{0}`, so `&&` sees the exit code of `{0}` (almost always 0). "
+                              "If the command before it failed, `{1}` runs anyway.".format(sw, act)}
     stmts = re.split(r"[;\n]", cmd)
     for prev, cur in zip(stmts, stmts[1:]):
         sw = last_stage(re.split(r"&&|\|\|", prev)[-1])
         if sw in SWALLOWERS and re.search(r"\$\?|\$LASTEXITCODE", cur):
-            return ("`$?` 拿到的是管道末段 `{0}` 的退出码，不是你要量的那条命令。\n"
-                    "EN: `$?` is the exit code of `{0}`, not of the command you meant to check.".format(sw))
+            return {"zh": "`$?` 拿到的是管道末段 `{0}` 的退出码，不是你要量的那条命令。".format(sw),
+                    "en": "`$?` holds the exit code of the last pipe stage `{0}`, not of the command you meant to check.".format(sw)}
     if os.environ.get("CGH_PIPE_STRICT") == "1":
         for stmt in stmts:
             for part in re.split(r"&&|\|\|", stmt):
                 sw = last_stage(part)
                 if sw in SWALLOWERS and TEST_RUNNER.search(part.split("|")[0]):
-                    return ("（严格模式）测试命令接了 `{0}`，测试失败也会显示成功。\n"
-                            "EN: (strict) test output piped into `{0}` hides a failing exit code.".format(sw))
+                    return {"zh": "（严格模式）测试命令接了 `{0}`，测试失败也会显示成功。".format(sw),
+                            "en": "(strict mode) The test command is piped into `{0}`, so a failing test run "
+                                  "still looks like success.".format(sw)}
     return None
 
 
-FIX = (
-    "改法（任选一种） / Fix (pick one):\n"
-    "  1. 去掉管道 / drop the pipe:            npm test && git commit ...\n"
-    "  2. 开 pipefail / enable pipefail:       set -o pipefail; npm test 2>&1 | tail -5 && git commit ...\n"
-    "  3. 取前段退出码 / check the real code:  npm test 2>&1 | tail -5; [ ${PIPESTATUS[0]} -eq 0 ] && git commit ...\n"
-)
+HEAD = {
+    "zh": "管道退出码闸：这条命令的 && / $? 守不住它看起来守着的东西。\n",
+    "en": "Pipe exit-code gate: the && / $? in this command does not guard what it looks like it guards.\n",
+}
+FIX = {
+    "zh": (
+        "改法（任选一种）：\n"
+        "  1. 去掉管道：      npm test && git commit ...\n"
+        "  2. 开 pipefail：   set -o pipefail; npm test 2>&1 | tail -5 && git commit ...\n"
+        "  3. 取前段退出码：  npm test 2>&1 | tail -5; [ ${PIPESTATUS[0]} -eq 0 ] && git commit ...\n"
+    ),
+    "en": (
+        "Fix (pick one):\n"
+        "  1. Drop the pipe:          npm test && git commit ...\n"
+        "  2. Enable pipefail:        set -o pipefail; npm test 2>&1 | tail -5 && git commit ...\n"
+        "  3. Check the real code:    npm test 2>&1 | tail -5; [ ${PIPESTATUS[0]} -eq 0 ] && git commit ...\n"
+    ),
+}
 
 
 def main():
@@ -128,9 +142,9 @@ def main():
     why = check(cmd) if isinstance(cmd, str) else None
     if not why:
         return 0
-    c.log_event("pipe_exitcode", why[:30])
-    sys.stderr.write("管道退出码闸 / pipe exit-code gate: 这条命令的 && / $? 守不住它看起来守着的东西。\n"
-                     + why + "\n" + FIX)
+    c.log_event("pipe_exitcode", why["zh"][:30])
+    lang = c.pick_lang(data=data)  # no reply yet: use Claude's latest text in the transcript
+    sys.stderr.write(HEAD[lang] + why[lang] + "\n" + FIX[lang])
     return 2
 
 

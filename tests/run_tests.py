@@ -238,6 +238,157 @@ def test_general():
         check(g, "繁体覆盖：规则里每个汉字的台湾繁体都能折回简体 ({} chars)".format(len(chars)), [], missing, " ".join(missing))
 
 
+CJK_OUT = re.compile(r"[　-〿㐀-䶿一-鿿＀-￯]")
+
+
+def lang_check(name, out, lang, must):
+    """Block message must be in exactly one language: `must` texts present, and for en no CJK
+    at all, for zh no English gate title / old 'EN:' line."""
+    missing = [m for m in must if m not in out]
+    if lang == "en":
+        bad = CJK_OUT.findall(out)
+        ok = not missing and not bad
+        why = "missing={} cjk={}".format(missing, "".join(bad[:20]))
+    else:
+        eng = [w for w in ("EN:", "Claim audit", "Retreat gate", "Pipe exit-code gate", "Secret scan gate") if w in out]
+        ok = not missing and not eng and bool(CJK_OUT.search(out))
+        why = "missing={} english={}".format(missing, eng)
+    check("language", name, True, ok, why + "\n" + out[:600])
+
+
+def make_secret_repo(tag):
+    parent = os.path.join(TMP, "lang-" + tag)
+    repo = os.path.join(parent, "repo")
+    os.makedirs(repo)
+    git(repo, "init", "-q")
+    with open(os.path.join(repo, "config.py"), "w", encoding="utf-8") as f:
+        f.write(fill("API_KEY = '{SK}'\n"))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "c0")
+    return repo
+
+
+def test_lang():
+    g = "language"
+    sys.path.insert(0, HOOKS)
+    import _common
+    # 0) The detector itself.
+    for text, want in [("I fixed the 登录 page and all tests pass.", "en"),
+                       ("I've pushed it. The user wrote 「先放着吧，等明天再说」 in the ticket.", "en"),
+                       ("用 Claude Code 的 PreToolUse hook 检查 git push", "zh"),
+                       ("这道闸会抓 `already fixed` 和 `tests pass` 这种说法。", "zh"),
+                       ("已修復，測試全部通過。", "zh"),
+                       ("```\n# 中文注释 中文注释 中文注释\n```\nDone, see above.", "en"),
+                       ("改了 stop_claim_audit.py、stop_retreat_gate.py、pre_pipe_exitcode.py 和 pre_push_secret_scan.py", "zh"),
+                       ("已修复 C:/Users/me/project/governance/LESSONS.md", "zh"),
+                       ("Updated src/app/page.tsx and lib/auth_helpers.ts as planned.", "en"),
+                       ("", "en")]:
+        check(g, "detect_lang({!r:.40}) = {}".format(text, want), want, _common.detect_lang(text), "")
+
+    # 0b) PreToolUse source text: the newest assistant line wins; malformed blocks are skipped.
+    def arow(text):
+        return {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+    long_en = arow("I looked through the whole module and the failing case comes from the date parser, "
+                   "so I will run the tests now.")
+    for name, rows, want in [
+        ("newest short Chinese line beats older long English", [long_en, {"type": "user", "message": {"content": "ok"}},
+                                                                arow("好的，马上跑测试。")], "zh"),
+        ("malformed text block (null / int) is skipped, not fatal", [arow("好的，马上跑测试。"), arow(None), arow(5)], "zh"),
+    ]:
+        check(g, "recent_assistant_text: " + name, want,
+              _common.detect_lang(_common.recent_assistant_text(rows)), "")
+
+    # 0c) Claude ran a command before saying anything: fall back to the user's message.
+    silent_zh = write_transcript({"transcript": [["user", "跑测试然后提交到主分支"], ["tool", "Bash"]]})
+    old = os.environ.pop("CGH_LANG", None)
+    try:
+        check(g, "pick_lang: Claude silent, Chinese user message -> zh", "zh",
+              _common.pick_lang(data={"transcript_path": silent_zh}), "")
+    finally:
+        if old is not None:
+            os.environ["CGH_LANG"] = old
+
+    # 1) Stop hooks: language of the reply being checked.
+    en_claim = {"user": "please push the branch", "tools": ["Read"], "reply": "I've pushed the fix for the 登录 page to origin."}
+    zh_claim = {"tools": ["Read", "Edit"], "reply": "已修复，测试全部通过。"}
+    for name, case, env, lang, must in [
+        ("claim: English reply (one Chinese word) -> English", en_claim, None, "en",
+         ["Claim audit", "I've pushed", "Pick one", "rewrite it as a plan"]),
+        ("claim: Chinese reply -> Chinese", zh_claim, None, "zh", ["声称对账闸", "已修复", "二选一"]),
+        ("claim: CGH_LANG=en overrides a Chinese reply", zh_claim, {"CGH_LANG": "en"}, "en",
+         ["Claim audit", "after your last file edit"]),
+    ]:
+        got, _, out = run_hook("stop_claim_audit.py", stop_payload(case), env)
+        check(g, name + " (blocks)", "block", got, out)
+        if lang == "en" and env:  # the hit is quoted from the Chinese reply, so only check the rest
+            out = out.replace("已修复", "")
+        lang_check(name, out, lang, must)
+
+    en_ret = {"user": "fix the parser", "reply": "This can't be done with the current API, so let's shelve it for now."}
+    zh_ret = {"reply": "我做不到，先放着吧。"}
+    for name, case, env, lang, must in [
+        ("retreat: English reply -> English", en_ret, None, "en",
+         ["Retreat gate", "Tried paths:", "| Path | Mechanism | Evidence | Result |", ">= 3 approaches"]),
+        ("retreat: Chinese reply -> Chinese", zh_ret, None, "zh", ["退路闸", "已试路径：", "| 路 | 机制 | 证据 | 结果 |"]),
+        ("retreat: CGH_LANG=zh overrides an English reply", en_ret, {"CGH_LANG": "zh"}, "zh", ["退路闸", "已试路径"]),
+    ]:
+        got, _, out = run_hook("stop_retreat_gate.py", stop_payload(case), env)
+        check(g, name + " (blocks)", "block", got, out)
+        lang_check(name, out, lang, must)
+
+    # 2) PreToolUse hooks: most recent assistant text in the transcript; none / unreadable -> English.
+    en_tx = write_transcript({"transcript": [["user", "run the tests and commit"],
+                                             ["assistant", "Running the test suite, then I'll commit."], ["tool", "Bash"]]})
+    zh_tx = write_transcript({"transcript": [["user", "跑测试然后提交"],
+                                             ["assistant", "先跑一遍测试，再提交。"], ["tool", "Bash"]]})
+    nowhere = os.path.join(TMP, "no-such-transcript.jsonl")
+    pipe_cmd = "npm test 2>&1 | tail -5 && git commit -m fix"
+    pipe_en = ["Pipe exit-code gate", "Drop the pipe", "Enable pipefail", "Check the real code", "PIPESTATUS"]
+    for name, tx, env, lang, must in [
+        ("pipe: English conversation -> English", en_tx, None, "en", pipe_en),
+        ("pipe: Chinese conversation -> Chinese", zh_tx, None, "zh", ["管道退出码闸", "去掉管道", "开 pipefail", "取前段退出码"]),
+        ("pipe: CGH_LANG=zh overrides an English conversation", en_tx, {"CGH_LANG": "zh"}, "zh", ["管道退出码闸"]),
+        ("pipe: transcript missing -> English", nowhere, None, "en", pipe_en),
+        ("pipe: no transcript_path at all -> English", None, None, "en", pipe_en),
+    ]:
+        payload = {"tool_name": "Bash", "tool_input": {"command": pipe_cmd}}
+        if tx:
+            payload["transcript_path"] = tx
+        got, _, out = run_hook("pre_pipe_exitcode.py", payload, env)
+        check(g, name + " (blocks)", "block", got, out)
+        lang_check(name, out, lang, must)
+
+    if not shutil.which("git"):
+        results.append((g, "secret scan language - git not installed, skipped", True, ""))
+    else:
+        repo = make_secret_repo("s")
+        sec_en = ["Secret scan gate", "sk-... API key", "rotate", "CGH_SECRET_ALLOW"]
+        for name, tx, env, lang, must in [
+            ("secret: English conversation -> English", en_tx, None, "en", sec_en),
+            ("secret: Chinese conversation -> Chinese", zh_tx, None, "zh", ["密钥扫描闸", "CGH_SECRET_ALLOW"]),
+            ("secret: CGH_LANG=en overrides a Chinese conversation", zh_tx, {"CGH_LANG": "en"}, "en", sec_en),
+            ("secret: transcript missing -> English", nowhere, None, "en", sec_en),
+        ]:
+            payload = {"tool_name": "Bash", "cwd": repo, "transcript_path": tx, "tool_input": {"command": "git push"}}
+            got, _, out = run_hook("pre_push_secret_scan.py", payload, env, cwd=repo)
+            check(g, name + " (blocks)", "block", got, out)
+            lang_check(name, out, lang, must)
+
+    # 3) install.py: header/footer in one language, JSON identical in both.
+    outs = {}
+    for name, env, lang, must in [
+        ("install.py: CGH_LANG=en -> English", {"CGH_LANG": "en"}, "en", ["Merge this \"hooks\" block", "Then run the tests"]),
+        ("install.py: CGH_LANG=zh -> Chinese", {"CGH_LANG": "zh"}, "zh", ["合并进", "装好后先跑测试"]),
+        ("install.py: Chinese locale (LC_ALL=zh_CN.UTF-8) -> Chinese", {"LC_ALL": "zh_CN.UTF-8"}, "zh", ["合并进"]),
+        ("install.py: English locale (LC_ALL=en_US.UTF-8) -> English", {"LC_ALL": "en_US.UTF-8"}, "en", ["Merge this"]),
+    ]:
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "install.py")], capture_output=True, env=base_env(env))
+        out = r.stdout.decode("utf-8", "replace")
+        outs[name] = out[out.index("{"):out.rindex("}") + 1] if "{" in out else ""
+        lang_check(name, out, lang, must)
+    check(g, "install.py: JSON is the same in both languages", 1, len(set(outs.values())), repr(list(outs.values()))[:400])
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -249,6 +400,7 @@ def main():
         test_pipe()
         test_secret()
         test_general()
+        test_lang()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     fails = 0

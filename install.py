@@ -21,6 +21,24 @@ HOOKS = {
 }
 
 
+def ui_lang():
+    """'zh' if CGH_LANG=zh, or (no CGH_LANG) the system locale is Chinese; else 'en'."""
+    forced = (os.environ.get("CGH_LANG") or "").strip().lower()[:2]
+    if forced in ("en", "zh"):
+        return forced
+    names = [os.environ.get(v) or "" for v in ("LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE")]
+    try:
+        import locale
+        names.append(locale.getlocale()[0] or "")  # Windows gives e.g. 'Chinese (Simplified)_China'
+    except (ValueError, TypeError, AttributeError):
+        pass
+    for n in names:
+        n = n.strip().lower()
+        if n:
+            return "zh" if n.startswith(("zh", "chinese")) else "en"
+    return "en"
+
+
 def quote(p):
     return '"' + p + '"' if " " in p else p
 
@@ -50,10 +68,15 @@ def main():
         group = {"matcher": matcher, "hooks": entries} if matcher else {"hooks": entries}
         hooks.setdefault(event, []).append(group)
 
-    print("把下面的 \"hooks\" 合并进 ~/.claude/settings.json（已有 hooks 的话，把条目加进对应数组，别整段覆盖）。")
-    print("Merge this \"hooks\" block into ~/.claude/settings.json (append to existing arrays; do not overwrite).\n")
+    zh = ui_lang() == "zh"
+    if zh:
+        print("把下面的 \"hooks\" 合并进 ~/.claude/settings.json（已有 hooks 的话，把条目加进对应数组，别整段覆盖）。\n")
+    else:
+        print("Merge this \"hooks\" block into ~/.claude/settings.json "
+              "(if you already have hooks, append these entries to the matching arrays; do not overwrite the whole block).\n")
     print(json.dumps({"hooks": hooks}, indent=2, ensure_ascii=False))
-    print("\n装好后先跑测试 / then verify:  {} {}".format(quote(args.python), quote(HERE + "/tests/run_tests.py")))
+    print("\n{}  {} {}".format("装好后先跑测试：" if zh else "Then run the tests to check:",
+                               quote(args.python), quote(HERE + "/tests/run_tests.py")))
 
 
 if __name__ == "__main__":

@@ -119,8 +119,15 @@ MSG_ZH = (
     "3) 回复里放标记行「已试路径：」+ 表头 | 路 | 机制 | 证据 | 结果 |，每条一行；\n"
     "4) 都试过仍不行，再附上证据，把「换目标」作为选项交给用户决定。"
 )
-MSG_EN = ("EN: You announced a retreat (\"{hit}\") without a tried-paths table. Try >= {n} different approaches, "
-          "then add a line 'Tried paths:' and a table | Path | Mechanism | Evidence | Result |.")
+MSG_EN = (
+    "Retreat gate: this reply says it can't be done / wants to change direction / shelve it (matched \"{hit}\"), "
+    "but has no tried-paths table.\n"
+    "Changing route means changing the method, not the goal; only the user can change the goal. First:\n"
+    "1) come up with >= {n} approaches that work differently (rewording a prompt does not count as a new one);\n"
+    "2) actually try each one in a temp directory or a separate branch (nothing in production, nothing that costs money);\n"
+    "3) put a marker line \"Tried paths:\" in the reply, then the header | Path | Mechanism | Evidence | Result |, one row per approach;\n"
+    "4) if every one still fails, attach the evidence and hand \"change the goal\" to the user as an option to decide."
+)
 
 
 def main():
@@ -145,7 +152,7 @@ def main():
         return 0
     c.log_event("retreat_gate", hit)
     n = c.env_int("RETREAT_MIN_PATHS", 3)
-    reason = MSG_ZH.format(hit=hit, n=n) + "\n" + MSG_EN.format(hit=hit, n=n)
+    reason = (MSG_ZH if c.pick_lang(reply) == "zh" else MSG_EN).format(hit=hit, n=n)
     print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
     return 0
 
