@@ -1,0 +1,1 @@
+不卖：Claude Code 守卫 hooks，已过时，需要时重做（Jeff 2026-11-26 题 6）
